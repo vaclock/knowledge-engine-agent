@@ -1,0 +1,18 @@
+{
+  "name": "knowledge-engine-agent",
+  "private": true,
+  "packageManager": "pnpm@9.1.1",
+  "scripts": {
+    "dev": "pnpm --filter @kea/api dev",
+    "dev:web": "pnpm --filter @kea/web dev",
+    "dev:api": "pnpm --filter @kea/api dev",
+    "dev:qdrant": "docker compose up -d qdrant",
+    "dev:qdrant:down": "docker compose stop qdrant",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}

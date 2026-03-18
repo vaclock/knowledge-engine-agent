@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@kea/ingestion": ["packages/ingestion/src/index.ts"],
+      "@kea/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@kea/markdown-sdk": ["packages/markdown-sdk/src/index.ts"]
+    },
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true
+  }
+}
