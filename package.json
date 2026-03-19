@@ -3,16 +3,17 @@
   "private": true,
   "packageManager": "pnpm@9.1.1",
   "scripts": {
-    "dev": "pnpm --filter @kea/api dev",
-    "dev:web": "pnpm --filter @kea/web dev",
-    "dev:api": "pnpm --filter @kea/api dev",
+    "dev": "pnpm dev:qdrant && turbo run dev",
+    "dev:web": "turbo run dev --filter=@kea/web",
+    "dev:api": "turbo run dev --filter=@kea/api",
     "dev:qdrant": "docker compose up -d qdrant",
     "dev:qdrant:down": "docker compose stop qdrant",
-    "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
+    "turbo": "^2.8.19",
     "typescript": "^5.7.3"
   }
 }
