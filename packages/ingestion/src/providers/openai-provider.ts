@@ -7,9 +7,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
   constructor(
     apiKey: string,
-    private readonly model = "text-embedding-3-large"
+    private readonly model = "text-embedding-3-large",
+    baseURL?: string
   ) {
-    this.openai = createOpenAI({ apiKey });
+    this.openai = createOpenAI({ apiKey, baseURL });
   }
 
   async embed(text: string): Promise<number[]> {

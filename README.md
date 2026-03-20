@@ -37,7 +37,6 @@ packages/
     src/repositories/ Qdrant/InMemory Repository
   markdown-sdk/
     src/index.ts      marked 渲染 + 自定义组件协议
-docker-compose.yml    本地 Qdrant
 ```
 
 ## 快速开始
@@ -45,7 +44,6 @@ docker-compose.yml    本地 Qdrant
 ```bash
 pnpm install
 cp .env.example .env
-pnpm dev:qdrant
 pnpm dev:api
 pnpm dev:web
 ```
@@ -54,19 +52,6 @@ pnpm dev:web
 
 - Web: http://localhost:3000
 - API: http://localhost:8080
-
-## 本地 Qdrant（Docker）
-
-```bash
-pnpm dev:qdrant
-curl http://localhost:6333/collections
-```
-
-停止：
-
-```bash
-pnpm dev:qdrant:down
-```
 
 ## API
 
@@ -102,7 +87,7 @@ pnpm dev:qdrant:down
 - `GEMINI_EMBEDDING_MODEL`：默认 `text-embedding-004`
 - `GEMINI_CHAT_MODEL`：默认 `gemini-1.5-flash`
 - `EMBEDDING_DIMENSION`：统一向量维度，默认 `3072`
-- `QDRANT_URL`：默认 `http://localhost:6333`
+- `QDRANT_URL`：你的云端 Qdrant 地址
 - `QDRANT_API_KEY`：Qdrant API key（若有）
 - `QDRANT_COLLECTION`：默认 `knowledge_chunks`
 - `NEXT_PUBLIC_API_BASE_URL`：前端 API 地址，默认 `http://localhost:8080`

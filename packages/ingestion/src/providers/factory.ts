@@ -22,7 +22,11 @@ const createProviderFromModelRef = (
     if (!apiKey) throw new Error("Google embedding requires apiKey");
     return new GeminiEmbeddingProvider(apiKey, model, options.embeddingDimension);
   }
-  throw new Error(`Unsupported embedding provider: ${provider}`);
+  const gatewayApiKey = options.apiKey ?? options.gatewayApiKey;
+  if (!gatewayApiKey) {
+    throw new Error(`Unsupported embedding provider without gateway key: ${provider}`);
+  }
+  return new OpenAIEmbeddingProvider(gatewayApiKey, modelRef, options.gatewayBaseUrl);
 };
 
 export const createEmbeddingProvider = (options: EmbeddingProviderFactoryOptions) => {

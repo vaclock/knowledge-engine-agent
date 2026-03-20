@@ -39,6 +39,8 @@ export interface VercelAIGatewayOptions {
   defaultModels?: string[];
   openAIApiKey?: string;
   googleApiKey?: string;
+  gatewayApiKey?: string;
+  gatewayBaseUrl?: string;
 }
 
 export interface ConversationState {
@@ -83,10 +85,14 @@ export class VercelAILLMGateway implements LLMGateway {
     this.defaultModels = options.defaultModels ?? [];
     this.openAIApiKey = options.openAIApiKey;
     this.googleApiKey = options.googleApiKey;
+    this.gatewayApiKey = options.gatewayApiKey;
+    this.gatewayBaseUrl = options.gatewayBaseUrl ?? "https://ai-gateway.vercel.sh/v1";
   }
 
   private readonly openAIApiKey?: string;
   private readonly googleApiKey?: string;
+  private readonly gatewayApiKey?: string;
+  private readonly gatewayBaseUrl: string;
 
   private resolveModel(ref: string, runtimeApiKey?: string): LanguageModel {
     const [provider, ...rest] = ref.split("/");
@@ -106,7 +112,13 @@ export class VercelAILLMGateway implements LLMGateway {
       const google = createGoogleGenerativeAI({ apiKey });
       return google(modelName);
     }
-    throw new Error(`unsupported_provider:${provider}`);
+    const gatewayApiKey = runtimeApiKey ?? this.gatewayApiKey;
+    if (!gatewayApiKey) throw new Error(`unsupported_provider_without_gateway_key:${provider}`);
+    const gateway = createOpenAI({
+      apiKey: gatewayApiKey,
+      baseURL: this.gatewayBaseUrl
+    });
+    return gateway(ref);
   }
 
   private async runModel(model: LanguageModel, input: { system: string; user: string; context: string }) {
@@ -194,6 +206,7 @@ export class AgentRuntime {
     query: string;
     messages?: ChatMessage[];
     threshold?: number;
+    alpha?: number;
     model?: string;
     fallbackModels?: string[];
     apiKey?: string;
@@ -212,7 +225,12 @@ export class AgentRuntime {
     let retrieval: SearchResult[] = [];
     let retrievalError = "";
     try {
-      retrieval = await this.ingestionService.retrieve(input.query, 4, input.threshold ?? 0.15);
+      retrieval = await this.ingestionService.retrieve(
+        input.query,
+        4,
+        input.threshold ?? 0.15,
+        input.alpha ?? 0.8
+      );
     } catch (error) {
       retrievalError = `检索失败：${String(error)}`;
     }

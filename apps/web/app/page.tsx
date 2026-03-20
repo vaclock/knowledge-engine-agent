@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { MessageSquare, Upload } from "lucide-react";
+import { MessageSquare, Settings2, Upload } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 
 export default function HomePage() {
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid gap-4 md:grid-cols-3">
       <Link href="/ingest">
         <Card className="h-full transition hover:shadow-md">
           <CardHeader>
@@ -30,6 +30,20 @@ export default function HomePage() {
           </CardHeader>
           <CardContent className="text-sm text-slate-600">
             页面自动维护 sessionId，并可在刷新后恢复最近对话上下文。
+          </CardContent>
+        </Card>
+      </Link>
+      <Link href="/config">
+        <Card className="h-full transition hover:shadow-md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Settings2 className="h-5 w-5" />
+              Agent 配置
+            </CardTitle>
+            <CardDescription>统一维护模型、API Key 与 Runtime 服务配置</CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-slate-600">
+            配置项保存在浏览器 storage，知识摄入与对话页面会自动读取并应用。
           </CardContent>
         </Card>
       </Link>

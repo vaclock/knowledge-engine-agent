@@ -24,6 +24,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <Link href="/chat" className="rounded-md px-3 py-2 text-slate-600 hover:bg-slate-100">
                   对话流
                 </Link>
+                <Link href="/config" className="rounded-md px-3 py-2 text-slate-600 hover:bg-slate-100">
+                  配置中心
+                </Link>
               </nav>
             </div>
           </header>

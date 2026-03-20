@@ -36,6 +36,8 @@ export interface EmbeddingProviderFactoryOptions {
   model?: string;
   fallbackModels?: string[];
   apiKey?: string;
+  gatewayApiKey?: string;
+  gatewayBaseUrl?: string;
   openAIApiKey?: string;
   openAIModel?: string;
   geminiApiKey?: string;

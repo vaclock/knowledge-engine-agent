@@ -1,12 +1,14 @@
 "use client";
 
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
-import { MessageSquare, Send, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { MessageSquare, Send, Settings2, Trash2 } from "lucide-react";
 import { createMarkdownRenderer, weatherCardRenderer } from "@kea/markdown-sdk";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { readAgentConfig } from "../../lib/agent-config";
 
 type Message = { role: "user" | "assistant"; content: string };
 
@@ -17,29 +19,20 @@ const renderer = createMarkdownRenderer({
 });
 
 export default function ChatPage() {
-  const endpoint = useMemo(() => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080", []);
+  const defaultApiBaseUrl = useMemo(
+    () => process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080",
+    []
+  );
+  const [config, setConfig] = useState(() => readAgentConfig(defaultApiBaseUrl));
   const [sessionId, setSessionId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [networkError, setNetworkError] = useState("");
-  const [model, setModel] = useState("openai/gpt-4o-mini");
-  const [fallbackModels, setFallbackModels] = useState("google/gemini-1.5-flash");
-  const [apiKey, setApiKey] = useState("");
-  const [embeddingModel, setEmbeddingModel] = useState("openai/text-embedding-3-small");
-  const [embeddingApiKey, setEmbeddingApiKey] = useState("");
 
   useEffect(() => {
-    const savedModel = window.localStorage.getItem("kea-chat-model");
-    const savedFallback = window.localStorage.getItem("kea-chat-fallback-models");
-    const savedApiKey = window.localStorage.getItem("kea-chat-api-key");
-    const savedEmbeddingModel = window.localStorage.getItem("kea-embedding-model");
-    const savedEmbeddingApiKey = window.localStorage.getItem("kea-embedding-api-key");
-    if (savedModel) setModel(savedModel);
-    if (savedFallback) setFallbackModels(savedFallback);
-    if (savedApiKey) setApiKey(savedApiKey);
-    if (savedEmbeddingModel) setEmbeddingModel(savedEmbeddingModel);
-    if (savedEmbeddingApiKey) setEmbeddingApiKey(savedEmbeddingApiKey);
+    const nextConfig = readAgentConfig(defaultApiBaseUrl);
+    setConfig(nextConfig);
 
     const bootstrap = async () => {
       try {
@@ -47,7 +40,7 @@ export default function ChatPage() {
         const saved = window.localStorage.getItem("kea-session-id");
         if (saved) {
           setSessionId(saved);
-          const stateResp = await fetch(`${endpoint}/api/session/${saved}`);
+          const stateResp = await fetch(`${nextConfig.apiBaseUrl}/api/session/${saved}`);
           if (stateResp.ok) {
             const state = await stateResp.json();
             const restored = Array.isArray(state.messages)
@@ -61,24 +54,24 @@ export default function ChatPage() {
             return;
           }
         }
-        const resp = await fetch(`${endpoint}/api/session`, { method: "POST" });
+        const resp = await fetch(`${nextConfig.apiBaseUrl}/api/session`, { method: "POST" });
         const data = await resp.json();
         if (data.sessionId) {
           setSessionId(data.sessionId);
           window.localStorage.setItem("kea-session-id", data.sessionId);
         }
       } catch {
-        setNetworkError("无法连接后端，请先启动 API（默认 http://localhost:8080）");
+        setNetworkError("无法连接后端，请先检查配置中心中的 Runtime 地址");
       }
     };
     void bootstrap();
-  }, [endpoint]);
+  }, [defaultApiBaseUrl]);
 
   const clearSession = async () => {
     if (!sessionId) return;
     try {
-      await fetch(`${endpoint}/api/session/${sessionId}`, { method: "DELETE" });
-      const resp = await fetch(`${endpoint}/api/session`, { method: "POST" });
+      await fetch(`${config.apiBaseUrl}/api/session/${sessionId}`, { method: "DELETE" });
+      const resp = await fetch(`${config.apiBaseUrl}/api/session`, { method: "POST" });
       const data = await resp.json();
       if (data.sessionId) {
         setSessionId(data.sessionId);
@@ -87,32 +80,50 @@ export default function ChatPage() {
       setMessages([]);
       setNetworkError("");
     } catch {
-      setNetworkError("清理会话失败，请检查 API 服务状态");
+      setNetworkError("清理会话失败，请检查配置中心中的 Runtime 服务状态");
     }
   };
 
   const ask = async () => {
     if (!query.trim() || !sessionId || loading) return;
+    if (!config.llmApiKey.trim()) {
+      setNetworkError("请先在配置中心填写 LLM API Key（必填）");
+      return;
+    }
+    if (!config.embeddingApiKey.trim()) {
+      setNetworkError("请先在配置中心填写 Embedding API Key（必填）");
+      return;
+    }
     const current = query.trim();
     setQuery("");
     setMessages((prev) => [...prev, { role: "user", content: current }]);
     setLoading(true);
     try {
-      const normalizedFallbackModels = fallbackModels
+      const normalizedFallbackModels = config.llmFallbackModels
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean);
-      const resp = await fetch(`${endpoint}/api/chat`, {
+      const embeddingFallbackModels =
+        config.embeddingFallbackModel && config.embeddingFallbackModel !== config.embeddingModel
+          ? [config.embeddingFallbackModel]
+          : [];
+      const resp = await fetch(`${config.apiBaseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
           query: current,
-          model,
+          threshold: config.strictKnowledgeMode ? config.retrievalThreshold : 0,
+          alpha: config.retrievalAlpha,
+          model: config.llmModel,
           fallbackModels: normalizedFallbackModels,
-          apiKey: apiKey || undefined,
-          embeddingModel,
-          embeddingApiKey: embeddingApiKey || undefined
+          apiKey: config.llmApiKey || undefined,
+          embeddingModel: config.embeddingModel,
+          embeddingFallbackModels,
+          embeddingApiKey: config.embeddingApiKey || undefined,
+          vectorDbUrl: config.vectorDbUrl || undefined,
+          vectorDbCollection: config.vectorDbCollection || undefined,
+          vectorDbApiKey: config.vectorDbApiKey || undefined
         })
       });
       const data = await resp.json();
@@ -124,7 +135,7 @@ export default function ChatPage() {
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "网络异常：无法连接后端 API，请确认服务已启动。" }
+        { role: "assistant", content: "网络异常：无法连接后端 API，请先检查配置中心。" }
       ]);
       setNetworkError("请求失败：后端不可达");
     } finally {
@@ -150,56 +161,27 @@ export default function ChatPage() {
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="grid h-[calc(100%-5.5rem)] grid-rows-[1fr_auto] gap-3">
+      <CardContent className="grid h-[calc(100%-5.5rem)] grid-rows-[auto_1fr_auto] gap-3">
         <div className="grid gap-2 rounded-md border bg-slate-50 p-3 md:grid-cols-2">
-          <Input
-            value={model}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              const value = event.target.value;
-              setModel(value);
-              window.localStorage.setItem("kea-chat-model", value);
-            }}
-            placeholder="聊天模型，如 openai/gpt-4o-mini"
-          />
-          <Input
-            value={fallbackModels}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              const value = event.target.value;
-              setFallbackModels(value);
-              window.localStorage.setItem("kea-chat-fallback-models", value);
-            }}
-            placeholder="备用模型，逗号分隔"
-          />
-          <Input
-            type="password"
-            value={apiKey}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              const value = event.target.value;
-              setApiKey(value);
-              window.localStorage.setItem("kea-chat-api-key", value);
-            }}
-            placeholder="聊天 API Key（可选，覆盖服务端默认）"
-          />
-          <Input
-            value={embeddingModel}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              const value = event.target.value;
-              setEmbeddingModel(value);
-              window.localStorage.setItem("kea-embedding-model", value);
-            }}
-            placeholder="Embedding 模型，如 openai/text-embedding-3-small"
-          />
-          <Input
-            type="password"
-            value={embeddingApiKey}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              const value = event.target.value;
-              setEmbeddingApiKey(value);
-              window.localStorage.setItem("kea-embedding-api-key", value);
-            }}
-            placeholder="Embedding API Key（可选）"
-            className="md:col-span-2"
-          />
+          <div className="rounded-md bg-white p-3 text-xs text-slate-600 md:col-span-2">
+            当前模型：{config.llmModel} · Embedding：{config.embeddingModel}
+            <br />
+            Runtime：{config.apiBaseUrl || "未配置"} · 向量库：{config.vectorDbCollection || "未配置"}
+          </div>
+          <Link
+            href="/config"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm text-slate-800 hover:bg-slate-50"
+          >
+            <Settings2 className="mr-2 h-4 w-4" />
+            打开配置中心
+          </Link>
+          <Button
+            variant="outline"
+            onClick={() => setConfig(readAgentConfig(defaultApiBaseUrl))}
+            className="md:justify-start"
+          >
+            重新加载配置
+          </Button>
         </div>
         <div className="space-y-3 overflow-auto pr-1">
           {networkError ? (

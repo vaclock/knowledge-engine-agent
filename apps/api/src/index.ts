@@ -11,19 +11,11 @@ import {
   type MCPBridge
 } from "@kea/agent-runtime";
 import { createEmbeddingProvider, IngestionService, QdrantVectorRepository } from "@kea/ingestion";
+import { listQdrantCollections } from "./qdrant-client.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
-
-const repository = new QdrantVectorRepository(
-  {
-    url: process.env.QDRANT_URL ?? "http://localhost:6333",
-    apiKey: process.env.QDRANT_API_KEY
-  },
-  process.env.QDRANT_COLLECTION ?? "knowledge_chunks",
-  Number(process.env.EMBEDDING_DIMENSION ?? 3072)
-);
 
 const mcpBridge: MCPBridge = {
   async invoke(serverName, toolName, args) {
@@ -40,14 +32,28 @@ const createRuntimeContext = (options?: {
   embeddingModel?: string;
   embeddingFallbackModels?: string[];
   embeddingApiKey?: string;
+  vectorDbUrl?: string;
+  vectorDbApiKey?: string;
+  vectorDbCollection?: string;
+  vectorDimension?: number;
 }) => {
+  const repository = new QdrantVectorRepository(
+    {
+      url: options?.vectorDbUrl ?? process.env.QDRANT_URL ?? "http://localhost:6333",
+      apiKey: options?.vectorDbApiKey ?? process.env.QDRANT_API_KEY
+    },
+    options?.vectorDbCollection ?? process.env.QDRANT_COLLECTION ?? "knowledge_chunks",
+    options?.vectorDimension ?? Number(process.env.EMBEDDING_DIMENSION ?? 3072)
+  );
+  const shouldUseDefaultEmbeddingModels =
+    !options?.embeddingModel && (!options?.embeddingFallbackModels || options.embeddingFallbackModels.length === 0);
   const defaultEmbeddingModels: string[] = [];
-  if (process.env.OPENAI_API_KEY) {
+  if (shouldUseDefaultEmbeddingModels && process.env.OPENAI_API_KEY) {
     defaultEmbeddingModels.push(
       `openai/${process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-large"}`
     );
   }
-  if (process.env.GEMINI_API_KEY) {
+  if (shouldUseDefaultEmbeddingModels && process.env.GEMINI_API_KEY) {
     defaultEmbeddingModels.push(
       `google/${process.env.GEMINI_EMBEDDING_MODEL ?? "text-embedding-004"}`
     );
@@ -56,10 +62,12 @@ const createRuntimeContext = (options?: {
     model: options?.embeddingModel,
     fallbackModels: options?.embeddingFallbackModels,
     apiKey: options?.embeddingApiKey,
+    gatewayApiKey: options?.embeddingApiKey,
+    gatewayBaseUrl: process.env.VERCEL_AI_GATEWAY_BASE_URL,
     defaultModels: defaultEmbeddingModels,
     openAIApiKey: process.env.OPENAI_API_KEY,
     geminiApiKey: process.env.GEMINI_API_KEY,
-    embeddingDimension: Number(process.env.EMBEDDING_DIMENSION ?? 3072)
+    embeddingDimension: options?.vectorDimension ?? Number(process.env.EMBEDDING_DIMENSION ?? 3072)
   });
   const ingestion = new IngestionService(embedding, repository);
   const llmGateway =
@@ -70,7 +78,9 @@ const createRuntimeContext = (options?: {
             `google/${process.env.GEMINI_CHAT_MODEL ?? "gemini-1.5-flash"}`
           ],
           openAIApiKey: process.env.OPENAI_API_KEY,
-          googleApiKey: process.env.GEMINI_API_KEY
+          googleApiKey: process.env.GEMINI_API_KEY,
+          gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY,
+          gatewayBaseUrl: process.env.VERCEL_AI_GATEWAY_BASE_URL
         })
       : new MockLLMGateway();
   const runtime = new AgentRuntime(ingestion, llmGateway, mcpBridge, conversationStore);
@@ -84,13 +94,20 @@ const createRuntimeContext = (options?: {
   return { runtime, ingestion };
 };
 
+const vectorStoreSchema = z.object({
+  vectorDbUrl: z.string().url().optional(),
+  vectorDbApiKey: z.string().min(1).optional(),
+  vectorDbCollection: z.string().min(1).optional(),
+  vectorDimension: z.number().int().min(1).max(8192).optional()
+});
+
 const ingestSchema = z.object({
   sourceId: z.string().min(1).optional(),
   content: z.string().min(1),
   embeddingModel: z.string().min(1).optional(),
   embeddingFallbackModels: z.array(z.string().min(1)).optional(),
-  embeddingApiKey: z.string().min(1).optional()
-});
+  embeddingApiKey: z.string().min(1)
+}).merge(vectorStoreSchema);
 
 const chatSchema = z.object({
   sessionId: z.string().min(1).optional(),
@@ -103,18 +120,23 @@ const chatSchema = z.object({
       })
     )
     .default([]),
-  threshold: z.number().min(0).max(1).optional()
-  ,
+  threshold: z.number().min(0).max(1).optional(),
+  alpha: z.number().min(0).max(1).optional(),
   model: z.string().min(1).optional(),
   fallbackModels: z.array(z.string().min(1)).optional(),
-  apiKey: z.string().min(1).optional(),
+  apiKey: z.string().min(1),
   embeddingModel: z.string().min(1).optional(),
   embeddingFallbackModels: z.array(z.string().min(1)).optional(),
-  embeddingApiKey: z.string().min(1).optional()
-});
+  embeddingApiKey: z.string().min(1)
+}).merge(vectorStoreSchema);
 
 const sessionSchema = z.object({
   sessionId: z.string().min(1).optional()
+});
+
+const vectorDbTestSchema = z.object({
+  vectorDbUrl: z.string().url(),
+  vectorDbApiKey: z.string().min(1).optional()
 });
 
 const readSessionParam = (req: Request) => {
@@ -132,12 +154,20 @@ app.post("/api/ingest", async (req: Request, res: Response) => {
     const { ingestion } = createRuntimeContext({
       embeddingModel: parsed.data.embeddingModel,
       embeddingFallbackModels: parsed.data.embeddingFallbackModels,
-      embeddingApiKey: parsed.data.embeddingApiKey
+      embeddingApiKey: parsed.data.embeddingApiKey,
+      vectorDbUrl: parsed.data.vectorDbUrl,
+      vectorDbApiKey: parsed.data.vectorDbApiKey,
+      vectorDbCollection: parsed.data.vectorDbCollection,
+      vectorDimension: parsed.data.vectorDimension
     });
     const result = await ingestion.ingest(sourceId, parsed.data.content);
     return res.json({ sourceId, chunks: result.chunks, count: result.count });
   } catch (error) {
-    return res.status(502).json({ error: "ingest_failed", detail: String(error) });
+    const detail = String(error);
+    const hint = detail.includes("Connect Timeout Error")
+      ? "embedding_provider_timeout：请切换到可达的 Embedding 模型，或在配置中移除不可达的备用模型"
+      : undefined;
+    return res.status(502).json({ error: "ingest_failed", detail, hint });
   }
 });
 
@@ -153,11 +183,17 @@ app.post("/api/chat", async (req: Request, res: Response) => {
       apiKey: parsed.data.apiKey,
       embeddingModel: parsed.data.embeddingModel,
       embeddingFallbackModels: parsed.data.embeddingFallbackModels,
-      embeddingApiKey: parsed.data.embeddingApiKey
+      embeddingApiKey: parsed.data.embeddingApiKey,
+      vectorDbUrl: parsed.data.vectorDbUrl,
+      vectorDbApiKey: parsed.data.vectorDbApiKey,
+      vectorDbCollection: parsed.data.vectorDbCollection,
+      vectorDimension: parsed.data.vectorDimension
     });
     const result = await runtime.ask({
       ...parsed.data,
       sessionId: parsed.data.sessionId ?? `session-${randomUUID()}`,
+      threshold: parsed.data.threshold,
+      alpha: parsed.data.alpha,
       model: parsed.data.model,
       fallbackModels: parsed.data.fallbackModels,
       apiKey: parsed.data.apiKey
@@ -184,11 +220,17 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       apiKey: parsed.data.apiKey,
       embeddingModel: parsed.data.embeddingModel,
       embeddingFallbackModels: parsed.data.embeddingFallbackModels,
-      embeddingApiKey: parsed.data.embeddingApiKey
+      embeddingApiKey: parsed.data.embeddingApiKey,
+      vectorDbUrl: parsed.data.vectorDbUrl,
+      vectorDbApiKey: parsed.data.vectorDbApiKey,
+      vectorDbCollection: parsed.data.vectorDbCollection,
+      vectorDimension: parsed.data.vectorDimension
     });
     const result = await runtime.ask({
       ...parsed.data,
       sessionId: parsed.data.sessionId ?? `session-${randomUUID()}`,
+      threshold: parsed.data.threshold,
+      alpha: parsed.data.alpha,
       model: parsed.data.model,
       fallbackModels: parsed.data.fallbackModels,
       apiKey: parsed.data.apiKey
@@ -223,6 +265,22 @@ app.post("/api/session", async (req: Request, res: Response) => {
   return res.json({ sessionId });
 });
 
+app.post("/api/vector-db/test", async (req: Request, res: Response) => {
+  const parsed = vectorDbTestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  try {
+    const collections = await listQdrantCollections({
+      url: parsed.data.vectorDbUrl,
+      apiKey: parsed.data.vectorDbApiKey
+    });
+    return res.json({ ok: true, collections });
+  } catch (error) {
+    return res.status(502).json({ ok: false, error: "vector_db_test_failed", detail: String(error) });
+  }
+});
+
 app.get("/api/session/:sessionId", async (req: Request, res: Response) => {
   const sessionId = readSessionParam(req);
   if (!sessionId) {
@@ -250,6 +308,18 @@ app.delete("/api/session/:sessionId", async (req: Request, res: Response) => {
 });
 
 app.delete("/api/knowledge", async (_req: Request, res: Response) => {
+  const parsed = vectorStoreSchema.safeParse(_req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  const repository = new QdrantVectorRepository(
+    {
+      url: parsed.data.vectorDbUrl ?? process.env.QDRANT_URL ?? "http://localhost:6333",
+      apiKey: parsed.data.vectorDbApiKey ?? process.env.QDRANT_API_KEY
+    },
+    parsed.data.vectorDbCollection ?? process.env.QDRANT_COLLECTION ?? "knowledge_chunks",
+    parsed.data.vectorDimension ?? Number(process.env.EMBEDDING_DIMENSION ?? 3072)
+  );
   await repository.clear();
   res.json({ ok: true });
 });
